@@ -25,8 +25,9 @@ from samplingviz.city import PRESETS, generate_scenario
 from samplingviz.sampling import METHODS, place
 from samplingviz.scoring import score_placement
 from samplingviz import teaching
-from samplingviz.viz import build_map, display_options, nearest_land_hex
-from samplingviz.sampling import METHOD_COLORS, METHOD_LABELS
+from samplingviz.viz import (build_base_map, sensor_layer, display_options,
+                             nearest_land_hex)
+from samplingviz.sampling import METHOD_COLORS
 
 COST_PER_SENSOR = 1000  # dollars per multi-parameter low-cost node
 
@@ -37,6 +38,19 @@ st.set_page_config(page_title="Sensor Placement Lab", page_icon="📡",
 @st.cache_data(show_spinner=False)
 def _scenario(preset_key, seed):
     return generate_scenario(preset_key, seed)
+
+
+@st.cache_resource(show_spinner=False)
+def _base_map(preset_key, seed, display_var, show_hotspots, basemap):
+    # heavy (432-polygon) hex layer, built once per view and reused across
+    # reruns so clicks/budget changes don't re-render the whole map
+    return build_base_map(_scenario(preset_key, seed), display_var,
+                          show_hotspots, basemap)
+
+
+@st.cache_data(show_spinner=False)
+def _placement(preset_key, seed, method, n):
+    return place(method, _scenario(preset_key, seed), n, seed)
 
 
 # --- session bootstrap ---------------------------------------------------
@@ -110,14 +124,16 @@ with map_col:
     overlay_ids, overlay_color, overlay_label = [], "#6a3d9a", "method"
     if overlay_choice != "None":
         mkey = {lbl: k for k, lbl, _ in METHODS}[overlay_choice]
-        overlay_ids = place(mkey, sc, n_sensors, int(seed))
+        overlay_ids = _placement(preset, int(seed), mkey, n_sensors)
         overlay_color = METHOD_COLORS[mkey]
         overlay_label = overlay_choice
 
-    fmap = build_map(sc, display_var, ss.student, overlay_ids=overlay_ids,
-                     overlay_color=overlay_color, overlay_label=overlay_label,
-                     show_hotspots=show_hotspots, basemap=basemap)
-    state = st_folium(fmap, height=560, use_container_width=True, key="map",
+    # cached static base + dynamic marker layer => fast reruns on click/budget
+    base = _base_map(preset, int(seed), display_var, show_hotspots, basemap)
+    fg = sensor_layer(sc, ss.student, overlay_ids=overlay_ids,
+                      overlay_color=overlay_color, overlay_label=overlay_label)
+    state = st_folium(base, feature_group_to_add=fg, height=560,
+                      use_container_width=True, key="map",
                       returned_objects=["last_clicked"])
 
     placed = len(ss.student)
@@ -155,7 +171,7 @@ with score_col:
 
     networks = {"You": list(ss.student)}
     for key, label, _ in METHODS:
-        networks[label] = place(key, sc, n_sensors, int(seed))
+        networks[label] = _placement(preset, int(seed), key, n_sensors)
 
     rows = []
     for name, ids in networks.items():

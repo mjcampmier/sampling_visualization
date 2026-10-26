@@ -50,9 +50,9 @@ def _colormap_for(display_var, values):
     return scale
 
 
-def build_map(scenario, display_var, student_ids, overlay_ids=None,
-              overlay_color="#6a3d9a", overlay_label="method",
-              show_hotspots=False, basemap=True):
+def build_base_map(scenario, display_var, show_hotspots=False, basemap=True):
+    """The static hex layer (no sensors). Cache this — it only changes when the
+    city/seed/display variable/toggles change, not when a student clicks."""
     preset = scenario["preset"]
     hexes = scenario["hexes"]
     polygons = scenario["polygons"]
@@ -124,25 +124,43 @@ def build_map(scenario, display_var, student_ids, overlay_ids=None,
             name="Hotspots",
         ).add_to(m)
 
+    if scale is not None:
+        scale.add_to(m)
+    return m
+
+
+def sensor_layer(scenario, student_ids, overlay_ids=None,
+                 overlay_color="#6a3d9a", overlay_label="method"):
+    """Dynamic markers as a FeatureGroup. Pass to st_folium via
+    `feature_group_to_add` so clicks/budget changes update *only* this layer
+    and the heavy base map is not re-rendered."""
+    hexes = scenario["hexes"]
+    fg = folium.FeatureGroup(name="sensors")
     # algorithm overlay first (so student markers sit on top)
     for i in (overlay_ids or []):
-        folium.CircleMarker(
+        fg.add_child(folium.CircleMarker(
             location=[hexes.at[int(i), "lat"], hexes.at[int(i), "lon"]],
             radius=7, color=overlay_color, weight=2, fill=True,
             fill_color=overlay_color, fill_opacity=0.55,
             tooltip=f"{overlay_label} sensor",
-        ).add_to(m)
-
+        ))
     for i in (student_ids or []):
-        folium.CircleMarker(
+        fg.add_child(folium.CircleMarker(
             location=[hexes.at[int(i), "lat"], hexes.at[int(i), "lon"]],
             radius=6, color="#111111", weight=2, fill=True,
             fill_color="#2b8cbe", fill_opacity=0.95,
             tooltip="your sensor (click to remove)",
-        ).add_to(m)
+        ))
+    return fg
 
-    if scale is not None:
-        scale.add_to(m)
+
+def build_map(scenario, display_var, student_ids, overlay_ids=None,
+              overlay_color="#6a3d9a", overlay_label="method",
+              show_hotspots=False, basemap=True):
+    """Convenience: base map + sensors in one object (used in tests/notebooks)."""
+    m = build_base_map(scenario, display_var, show_hotspots, basemap)
+    sensor_layer(scenario, student_ids, overlay_ids, overlay_color,
+                 overlay_label).add_to(m)
     return m
 
 
